@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>2D Car Prototype</title>
+<style>
+    html, body { margin:0; padding:0; overflow:hidden; background:#111; color:#fff; font-family:sans-serif; }
+    #ui { position:fixed; top:10px; left:10px; z-index:10; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="ui">
+    <div id="speedDisp">Speed: 0</div>
+    <div id="fpsDisp">FPS: 0</div>
+</div>
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+let W = window.innerWidth, H = window.innerHeight;
+canvas.width = W; canvas.height = H;
+
+// Camera
+let camX=0, camY=0;
+
+// Input
+const keys = {};
+window.addEventListener("keydown", e => keys[e.key.toLowerCase()]=true);
+window.addEventListener("keyup", e => keys[e.key.toLowerCase()]=false);
+
+// Player Car
+class Car {
+    constructor(x,y,color){
+        this.x=x; this.y=y;
+        this.w=40; this.h=20;
+        this.angle=0;
+        this.speed=0;
+        this.accel=0.2;
+        this.maxSpeed=6;
+        this.friction=0.05;
+        this.turnSpeed=0.04;
+        this.color=color;
+    }
+    update(){
+        // Input
+        if(keys["w"]) this.speed += this.accel;
+        if(keys["s"]) this.speed -= this.accel;
+        if(keys["a"]) this.angle -= this.turnSpeed * (this.speed/this.maxSpeed);
+        if(keys["d"]) this.angle += this.turnSpeed * (this.speed/this.maxSpeed);
+
+        // Limit speed
+        this.speed = Math.max(Math.min(this.speed, this.maxSpeed), -this.maxSpeed);
+
+        // Apply friction
+        this.speed *= (1-this.friction);
+
+        // Update position
+        this.x += Math.cos(this.angle)*this.speed;
+        this.y += Math.sin(this.angle)*this.speed;
+    }
+    draw(){
+        ctx.save();
+        ctx.translate(this.x - camX, this.y - camY);
+        ctx.rotate(this.angle);
+        ctx.fillStyle=this.color;
+        ctx.fillRect(-this.w/2,-this.h/2,this.w,this.h);
+        ctx.restore();
+    }
+}
+
+// Instantiate player
+let player = new Car(300,300,"cyan");
+
+// FPS calculation
+let lastTime = performance.now(), fps=0;
+
+// Game loop
+function loop(time){
+    const delta = (time-lastTime)/1000;
+    lastTime=time;
+    fps = 1/delta;
+
+    // Update
+    player.update();
+
+    // Camera follows player
+    camX = player.x - W/2;
+    camY = player.y - H/2;
+
+    // Clear
+    ctx.fillStyle="#111";
+    ctx.fillRect(0,0,W,H);
+
+    // Draw player
+    player.draw();
+
+    // Update UI
+    document.getElementById("speedDisp").textContent = "Speed: "+player.speed.toFixed(1);
+    document.getElementById("fpsDisp").textContent = "FPS: "+fps.toFixed(0);
+
+    requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
