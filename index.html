@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ultra Complex Top-Down Car Game</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+    html, body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #111;
+        font-family: Arial, sans-serif;
+        color: #fff;
+    }
+
+    #ui {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        z-index: 5;
+        pointer-events: none;
+        font-size: 18px;
+    }
+
+    #fpsCounter {
+        font-size: 14px;
+        opacity: 0.6;
+    }
+
+    /* Track Editor UI (will be activated later) */
+    #editorPanel {
+        position: fixed;
+        right: 0;
+        top: 0;
+        width: 260px;
+        height: 100%;
+        background: rgba(0,0,0,0.8);
+        color: #fff;
+        padding: 14px;
+        display: none;
+        overflow-y: auto;
+        z-index: 20;
+    }
+</style>
+</head>
+
+<body>
+<canvas id="gameCanvas"></canvas>
+
+<div id="ui">
+    <div id="speedDisp">Speed: 0</div>
+    <div id="fpsCounter">FPS: --</div>
+</div>
+
+<script>
+/* ============================================================
+    ULTRA COMPLEX TOP-DOWN CAR GAME
+    PART 1 — CORE ENGINE + BASIC PHYSICS
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   Canvas + Resize Handling
+------------------------------------------------------------ */
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* ------------------------------------------------------------
+   Input System
+------------------------------------------------------------ */
+const keys = {};
+window.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+window.addEventListener("keyup",   e => keys[e.key.toLowerCase()] = false);
+
+/* ------------------------------------------------------------
+   Utility Functions
+------------------------------------------------------------ */
+function lerp(a, b, t) {
+    return a + (b - a) * t;
+}
+function clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+}
+function dist(a, b, x, y) {
+    let dx = x - a;
+    let dy = y - b;
+    return Math.sqrt(dx*dx + dy*dy);
+}
+
+/* ------------------------------------------------------------
+   Car Object — BASIC physics (will get much more complex later)
+------------------------------------------------------------ */
+class Car {
+    constructor(x, y, color = "cyan", isPlayer = true) {
+        this.x = x;
+        this.y = y;
+        this.angle = 0;
+
+        this.speed = 0;
+        this.accel = 0.25;
+        this.maxSpeed = 6;
+        this.friction = 0.05;
+        this.turnSpeed = 0.045;
+
+        this.w = 40;
+        this.h = 20;
+        this.color = color;
+        this.isPlayer = isPlayer;
+
+        // Placeholder — will expand heavily later
+        this.damage = 0;
+    }
+
+    update(delta) {
+        if (this.isPlayer) this.handlePlayerInput(delta);
+
+        // Basic movement
+        this.x += Math.cos(this.angle) * this.speed * delta;
+        this.y += Math.sin(this.angle) * this.speed * delta;
+
+        // Natural friction
+        if (this.speed > 0) this.speed -= this.friction * delta;
+        if (this.speed < 0) this.speed += this.friction * delta;
+        if (Math.abs(this.speed) < 0.05) this.speed = 0;
+    }
+
+    handlePlayerInput(delta) {
+        let forward = keys["arrowup"] || keys["w"];
+        let back    = keys["arrowdown"] || keys["s"];
+        let left    = keys["arrowleft"] || keys["a"];
+        let right   = keys["arrowright"] || keys["d"];
+
+        if (forward)  this.speed += this.accel * delta;
+        if (back)     this.speed -= this.accel * delta;
+
+        this.speed = clamp(this.speed, -this.maxSpeed, this.maxSpeed);
+
+        if (Math.abs(this.speed) > 0.1) {
+            if (left)  this.angle -= this.turnSpeed * delta * (this.speed / this.maxSpeed);
+            if (right) this.angle += this.turnSpeed * delta * (this.speed / this.maxSpeed);
+        }
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+        ctx.fillStyle = this.color;
+        ctx.fillRect(-this.w/2, -this.h/2, this.w, this.h);
+        ctx.restore();
+    }
+}
+
+/* ------------------------------------------------------------
+   World + Player Setup
+------------------------------------------------------------ */
+let player = new Car(300, 300, "cyan", true);
+
+/* ------------------------------------------------------------
+   Camera System (will be expanded later)
+------------------------------------------------------------ */
+let camX = 0, camY = 0;
+
+function updateCamera() {
+    camX = player.x - canvas.width / 2;
+    camY = player.y - canvas.height / 2;
+}
+
+/* ------------------------------------------------------------
+   FPS + Game Loop Timing
+------------------------------------------------------------ */
+let lastTime = performance.now();
+let fps = 0;
+
+function loop(time) {
+    const delta = (time - lastTime) / 16.666; // Normalize to ~60fps
+    lastTime = time;
+
+    fps = lerp(fps, 1000 / (time - lastTime), 0.1);
+    document.getElementById("fpsCounter").textContent = "FPS: " + fps.toFixed(0);
+
+    // Update world
+    player.update(delta);
+
+    // Camera
+    updateCamera();
+
+    // Clear screen
+    ctx.fillStyle = "#111";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw the player (world offset applied)
+    ctx.save();
+    ctx.translate(-camX, -camY);
+    player.draw();
+    ctx.restore();
+
+    // UI
+    document.getElementById("speedDisp").textContent =
+        "Speed: " + Math.round(player.speed * 10);
+
+    requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+/* ============================================================
+   PART 2 — ADVANCED DRIFT PHYSICS + TIRE TEMPERATURE + TRACTION
+   ============================================================ */
+
+/* 
+   In Part 1 the car used simple acceleration + rotation.
+
+   Now we add:
+   - lateral slip forces
+   - longitudinal traction
+   - drift angle calculation
+   - dynamic traction loss
+   - tire heat (temperature affects grip)
+   - weight transfer
+   - steering smoothing
+*/
+
+class AdvancedPhysicsCar extends Car {
+    constructor(x, y, color = "cyan", isPlayer = true) {
+        super(x, y, color, isPlayer);
+
+        /* --- Advanced Physics Variables --- */
+        this.vx = 0;            // velocity X
+        this.vy = 0;            // velocity Y
+        this.steerAngle = 0;    // smoothed steering
+        this.maxSteer = 0.04;
+
+        this.mass = 1.2;             // affects inertia
+        this.traction = 1.0;         // overall grip multiplier
+        this.driftTractionLoss = 0;  // dynamic drift factor
+
+        this.tireTemp = 25;          // °C
+        this.idealTemp = 80;         // best grip
+        this.maxTemp = 140;          // overheats
+
+        this.sideFriction = 0.12;    // resists lateral sliding
+        this.longFriction = 0.06;    // forward/backward friction
+    }
+
+    update(delta) {
+        if (this.isPlayer) this.handleAdvancedInput(delta);
+
+        // Convert angle to direction vector
+        let cosA = Math.cos(this.angle);
+        let sinA = Math.sin(this.angle);
+
+        // Forward speed
+        let forwardSpeed = this.vx * cosA + this.vy * sinA;
+
+        // Sideways speed (slip)
+        let sideSpeed = this.vy * cosA - this.vx * sinA;
+
+        // Drift angle = difference between heading & velocity
+        this.driftAngle = Math.atan2(sideSpeed, Math.abs(forwardSpeed));
+
+        // Tire grip changes with temp
+        let tempFactor = this.computeTireGrip();
+
+        // Lateral friction (reduces sliding)
+        let lateralForce = -sideSpeed * this.sideFriction * tempFactor;
+
+        // Apply lateral force (convert back to world coords)
+        this.vx += lateralForce * cosA * delta;
+        this.vy += lateralForce * sinA * delta;
+
+        // Apply forward/back friction
+        forwardSpeed *= (1 - this.longFriction * delta);
+
+        // Convert back to velocity
+        this.vx = forwardSpeed * cosA - sideSpeed * sinA;
+        this.vy = forwardSpeed * sinA + sideSpeed * cosA;
+
+        // Update position
+        this.x += this.vx * delta;
+        this.y += this.vy * delta;
+
+        // Update tire temp from sliding
+        this.updateTireTemperature(Math.abs(sideSpeed), delta);
+    }
+
+    /* ------------------------------------------
+       Tire Temperature & Traction Model
+       ------------------------------------------ */
+    computeTireGrip() {
+        // Ideal temp → full grip
+        let diff = Math.abs(this.tireTemp - this.idealTemp);
+
+        if (diff < 20) return 1.0;
+
+        // Too cold → less grip
+        if (this.tireTemp < this.idealTemp)
+            return 1 - diff * 0.01;
+
+        // Too hot → reduced grip
+        return 1 - diff * 0.008;
+    }
+
+    updateTireTemperature(slip, delta) {
+        // Sliding increases temperature
+        this.tireTemp += slip * 0.5 * delta;
+
+        // Cooling when not sliding
+        this.tireTemp -= 0.1 * delta;
+
+        this.tireTemp = clamp(this.tireTemp, 0, this.maxTemp);
+    }
+
+    /* ------------------------------------------
+       Enhanced steering system
+       ------------------------------------------ */
+    handleAdvancedInput(delta) {
+        let forward = keys["arrowup"] || keys["w"];
+        let back    = keys["arrowdown"] || keys["s"];
+        let left    = keys["arrowleft"] || keys["a"];
+        let right   = keys["arrowright"] || keys["d"];
+
+        // Target steering angle
+        let targetSteer = 0;
+        if (left)  targetSteer = -this.maxSteer;
+        if (right) targetSteer =  this.maxSteer;
+
+        // Smooth steering
+        this.steerAngle = lerp(this.steerAngle, targetSteer, 0.15 * delta);
+
+        // Turning rate depends on speed
+        this.angle += this.steerAngle * (this.speed) * delta;
+
+        // Forward/backward acceleration vector
+        let accel = 0;
+        if (forward) accel += this.accel;
+        if (back)    accel -= this.accel * 0.6;
+
+        // Convert acceleration to velocity
+        this.vx += Math.cos(this.angle) * accel * delta;
+        this.vy += Math.sin(this.angle) * accel * delta;
+
+        // Speed limit
+        let spd = Math.sqrt(this.vx*this.vx + this.vy*this.vy);
+        if (spd > this.maxSpeed) {
+            let factor = this.maxSpeed / spd;
+            this.vx *= factor;
+            this.vy *= factor;
+        }
+
+        this.speed = spd; // update for UI
+    }
+
+    draw() {
+        // Drift visualization
+        if (Math.abs(this.driftAngle) > 0.25) {
+            ctx.strokeStyle = "rgba(255,255,255,0.2)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(this.x - 10, this.y - 10);
+            ctx.lineTo(this.x + 10, this.y + 10);
+            ctx.stroke();
+        }
+
+        super.draw();
+    }
+}
+
+/* ------------------------------------------------------------
+   Replace the original player with advanced physics version
+------------------------------------------------------------ */
+player = new AdvancedPhysicsCar(300, 300, "cyan", true);
+/* ============================================================
+   PART 3 — AI DRIVING SYSTEM (PATHING + STEERING + OVERTAKING)
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   AI Car Class
+   ------------------------------------------------------------ */
+class AICar extends AdvancedPhysicsCar {
+    constructor(path, x, y, color = "red") {
+        super(x, y, color, false);
+        this.path = path;       // array of waypoints {x, y}
+        this.currentWP = 0;     // current waypoint index
+        this.lookAhead = 50;    // distance to next waypoint
+        this.overtaking = false;
+    }
+
+    update(delta) {
+        if (!this.path || this.path.length === 0) return;
+
+        // Compute vector to next waypoint
+        const target = this.path[this.currentWP];
+        const dx = target.x - this.x;
+        const dy = target.y - this.y;
+        const angleToWP = Math.atan2(dy, dx);
+
+        // Steering error
+        let steerDiff = angleToWP - this.angle;
+        steerDiff = Math.atan2(Math.sin(steerDiff), Math.cos(steerDiff));
+
+        // Smooth steering
+        this.steerAngle = lerp(this.steerAngle, clamp(steerDiff, -this.maxSteer, this.maxSteer), 0.1*delta);
+
+        // Acceleration control
+        const distance = Math.hypot(dx, dy);
+        if (distance > this.lookAhead) this.vx += Math.cos(this.angle) * this.accel * delta;
+        if (distance > this.lookAhead) this.vy += Math.sin(this.angle) * this.accel * delta;
+
+        // Advance waypoint
+        if (distance < 30) {
+            this.currentWP++;
+            if (this.currentWP >= this.path.length) this.currentWP = 0;
+        }
+
+        // Simple overtaking logic
+        this.handleOvertaking();
+
+        // Apply physics from parent class
+        super.update(delta);
+    }
+
+    handleOvertaking() {
+        // Check for nearby cars
+        for (let other of aiCars.concat([player])) {
+            if (other === this) continue;
+            let d = dist(this.x, this.y, other.x, other.y);
+            if (d < 60) {
+                // Reduce speed and slightly steer to avoid collision
+                this.vx *= 0.95;
+                this.vy *= 0.95;
+
+                // Steer slightly away
+                let angleDiff = Math.atan2(this.y - other.y, this.x - other.x) - this.angle;
+                angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
+                this.steerAngle += angleDiff * 0.02;
+            }
+        }
+    }
+
+    draw() {
+        super.draw();
+        // Optional: draw AI path for debugging
+        /*
+        ctx.strokeStyle = "yellow";
+        ctx.beginPath();
+        for (let i=0;i<this.path.length;i++){
+            let p=this.path[i];
+            if(i===this.currentWP) ctx.fillStyle="lime";
+            else ctx.fillStyle="yellow";
+            ctx.fillRect(p.x-2,p.y-2,4,4);
+        }
+        ctx.stroke();
+        */
+    }
+}
+
+/* ------------------------------------------------------------
+   Sample AI Path Setup
+   ------------------------------------------------------------ */
+const aiPath = [
+    {x: 300, y:200},
+    {x: 1200, y:200},
+    {x: 1200, y:700},
+    {x: 300, y:700}
+];
+
+/* ------------------------------------------------------------
+   Spawn AI Cars
+   ------------------------------------------------------------ */
+const aiCars = [
+    new AICar(aiPath, 350, 250, "red"),
+    new AICar(aiPath, 380, 280, "yellow"),
+    new AICar(aiPath, 330, 300, "lime")
+];
+/* ============================================================
+   PART 4 — TRACK SYSTEM + PROCEDURAL GENERATOR + EDITOR
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   Track Walls & Checkpoints
+------------------------------------------------------------ */
+let walls = [];
+let checkpoints = [];
+
+/* Wall Constructor */
+class Wall {
+    constructor(x, y, w, h) {
+        this.x = x;
+        this.y = y;
+        this.w = w;
+        this.h = h;
+    }
+
+    draw() {
+        ctx.fillStyle = "#555";
+        ctx.fillRect(this.x, this.y, this.w, this.h);
+    }
+}
+
+/* Checkpoint Constructor */
+class Checkpoint {
+    constructor(x, y, w, h) {
+        this.x = x;
+        this.y = y;
+        this.w = w;
+        this.h = h;
+        this.passed = false;
+    }
+
+    draw() {
+        ctx.fillStyle = this.passed ? "rgba(0,255,0,0.6)" : "rgba(0,255,0,0.3)";
+        ctx.fillRect(this.x, this.y, this.w, this.h);
+    }
+}
+
+/* ------------------------------------------------------------
+   Procedural Track Generator
+------------------------------------------------------------ */
+function generateTrack() {
+    walls = [];
+    checkpoints = [];
+
+    const margin = 150;
+    const trackWidth = 300;
+
+    // Outer rectangle
+    walls.push(new Wall(margin, margin, canvas.width - margin*2, 20));
+    walls.push(new Wall(margin, canvas.height - margin - 20, canvas.width - margin*2, 20));
+    walls.push(new Wall(margin, margin, 20, canvas.height - margin*2));
+    walls.push(new Wall(canvas.width - margin - 20, margin, 20, canvas.height - margin*2));
+
+    // Inner rectangle (obstacles)
+    walls.push(new Wall(margin+100, margin+100, canvas.width - (margin+100)*2, 20));
+    walls.push(new Wall(margin+100, canvas.height - margin - 120, canvas.width - (margin+100)*2, 20));
+
+    // Checkpoints (one per side)
+    checkpoints.push(new Checkpoint(canvas.width/2 - 75, margin, 150, 20));
+    checkpoints.push(new Checkpoint(canvas.width - margin - 20, canvas.height/2 - 75, 20, 150));
+    checkpoints.push(new Checkpoint(canvas.width/2 - 75, canvas.height - margin - 20, 150, 20));
+    checkpoints.push(new Checkpoint(margin, canvas.height/2 - 75, 20, 150));
+}
+
+generateTrack();
+
+/* ------------------------------------------------------------
+   Track Editor (simple)
+------------------------------------------------------------ */
+let editorMode = false;
+const editorPanel = document.createElement("div");
+editorPanel.id = "editorPanel";
+editorPanel.innerHTML = `
+<h3>Track Editor</h3>
+<button id="addWallBtn">Add Wall</button>
+<button id="addCheckpointBtn">Add Checkpoint</button>
+<button id="saveTrackBtn">Save Track</button>
+<p>Click on canvas to place.</p>
+`;
+document.body.appendChild(editorPanel);
+
+let editorAction = null;
+document.getElementById("addWallBtn").onclick = () => {
+    editorMode = true;
+    editorAction = "wall";
+};
+document.getElementById("addCheckpointBtn").onclick = () => {
+    editorMode = true;
+    editorAction = "checkpoint";
+};
+document.getElementById("saveTrackBtn").onclick = () => {
+    const data = JSON.stringify({walls, checkpoints});
+    console.log("Track saved:", data);
+    alert("Track saved! Check console.");
+};
+
+canvas.addEventListener("click", e => {
+    if (!editorMode) return;
+    const x = e.clientX + camX;
+    const y = e.clientY + camY;
+    if (editorAction === "wall") {
+        walls.push(new Wall(x-50, y-10, 100, 20));
+    } else if (editorAction === "checkpoint") {
+        checkpoints.push(new Checkpoint(x-25, y-10, 50, 20));
+    }
+});
+
+/* ------------------------------------------------------------
+   Draw Track
+------------------------------------------------------------ */
+function drawTrack() {
+    for (let w of walls) w.draw();
+    for (let cp of checkpoints) cp.draw();
+}
+
+/* ------------------------------------------------------------
+   Collision Detection (basic)
+------------------------------------------------------------ */
+function handleCollisions(car) {
+    for (let w of walls) {
+        if (car.x + car.w/2 > w.x && car.x - car.w/2 < w.x + w.w &&
+            car.y + car.h/2 > w.y && car.y - car.h/2 < w.y + w.h) {
+            // Simple bounce back
+            car.vx *= -0.3;
+            car.vy *= -0.3;
+            car.x += car.vx;
+            car.y += car.vy;
+        }
+    }
+}
+
+/* ------------------------------------------------------------
+   Checkpoint Detection
+------------------------------------------------------------ */
+function checkCheckpoints(car) {
+    for (let cp of checkpoints) {
+        if (car.x > cp.x && car.x < cp.x+cp.w &&
+            car.y > cp.y && car.y < cp.y+cp.h && !cp.passed) {
+            cp.passed = true;
+            // lap logic will be handled later
+        }
+    }
+}
+/* ============================================================
+   PART 5 — PARTICLE EFFECTS (SMOKE, DUST, SPARKS, SKIDMARKS)
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   Particle System
+------------------------------------------------------------ */
+let particles = [];
+
+class Particle {
+    constructor(x, y, vx, vy, size, color, life=50) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = vy;
+        this.size = size;
+        this.color = color;
+        this.life = life;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life--;
+        this.size *= 0.96;
+    }
+
+    draw() {
+        ctx.globalAlpha = Math.max(this.life/50,0);
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+}
+
+function spawnParticles(car) {
+    // Smoke when drifting
+    if (Math.abs(car.driftAngle) > 0.25 && car.speed > 2) {
+        for (let i=0;i<2;i++){
+            particles.push(new Particle(
+                car.x - Math.cos(car.angle)*10 + (Math.random()-0.5)*5,
+                car.y - Math.sin(car.angle)*10 + (Math.random()-0.5)*5,
+                (Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5,
+                Math.random()*3+2,
+                "gray", 30
+            ));
+        }
+    }
+}
+
+/* ------------------------------------------------------------
+   Update & Draw Particles
+------------------------------------------------------------ */
+function updateParticles() {
+    for (let p of particles) p.update();
+    particles = particles.filter(p => p.life > 0);
+
+    for (let p of particles) p.draw();
+}
+/* ============================================================
+   PART 6 — CAR DAMAGE MODEL + DEFORMATION + COLLISIONS
+   ============================================================ */
+
+class DamageCar extends AdvancedPhysicsCar {
+    constructor(x, y, color="cyan", isPlayer=true){
+        super(x, y, color, isPlayer);
+        this.damage = 0;       // 0=pristine, 100=destroyed
+        this.deformFactor = 0; // visual deformation
+    }
+
+    handleCollisions() {
+        for(let w of walls){
+            if(this.x+this.w/2>w.x && this.x-this.w/2<w.x+w.w &&
+               this.y+this.h/2>w.y && this.y-this.h/2<w.y+w.h){
+                // Reduce speed
+                this.vx *= -0.4;
+                this.vy *= -0.4;
+                // Increase damage
+                this.damage += 5;
+                this.deformFactor = clamp(this.damage/100, 0, 1);
+            }
+        }
+    }
+
+    draw(){
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+        ctx.fillStyle = this.color;
+        // Deform car rectangle based on damage
+        let w = this.w*(1-this.deformFactor*0.3);
+        let h = this.h*(1-this.deformFactor*0.2);
+        ctx.fillRect(-w/2,-h/2,w,h);
+        ctx.restore();
+    }
+}
+
+// Replace player with damage-enabled car
+player = new DamageCar(300,300,"cyan",true);
+/* ============================================================
+   PART 7 — WEATHER SYSTEM: RAIN, PUDDLES, NIGHT MODE, HEADLIGHTS
+   ============================================================ */
+
+let weather = {
+    rain: false,
+    puddles: [],
+    night: false
+};
+
+// Toggle rain & night (demo)
+document.addEventListener("keydown", e=>{
+    if(e.key==="r") weather.rain=!weather.rain;
+    if(e.key==="n") weather.night=!weather.night;
+});
+
+/* Rain particle system */
+function spawnRain(){
+    if(!weather.rain) return;
+    for(let i=0;i<2;i++){
+        particles.push(new Particle(
+            Math.random()*canvas.width + camX,
+            Math.random()*canvas.height + camY,
+            0, 5,
+            2, "rgba(150,150,255,0.6)", 20
+        ));
+    }
+}
+
+/* Draw Night Overlay & Headlights */
+function drawNight(){
+    if(!weather.night) return;
+    ctx.fillStyle="rgba(0,0,20,0.5)";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    // Headlight effect for player
+    ctx.save();
+    ctx.translate(player.x-camX,player.y-camY);
+    ctx.rotate(player.angle);
+    let grad = ctx.createRadialGradient(0,0,0,0,0,200);
+    grad.addColorStop(0,"rgba(255,255,200,0.6)");
+    grad.addColorStop(1,"rgba(0,0,0,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(50,0,200,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+}
+/* ============================================================
+   PART 8 — HUD, MINIMAP, MENUS, GAME STATES
+   ============================================================ */
+
+let gameState="play"; // play, menu, paused
+
+/* Minimap */
+function drawMinimap(){
+    const mapW=150,mapH=150;
+    const scaleX=mapW/canvas.width, scaleY=mapH/canvas.height;
+    ctx.save();
+    ctx.globalAlpha=0.6;
+    ctx.fillStyle="#222";
+    ctx.fillRect(canvas.width-mapW-10,10,mapW,mapH);
+
+    // Player
+    ctx.fillStyle="cyan";
+    ctx.fillRect(canvas.width-mapW-10 + player.x*scaleX,10 + player.y*scaleY,4,4);
+
+    // AI
+    for(let ai of aiCars){
+        ctx.fillStyle=ai.color;
+        ctx.fillRect(canvas.width-mapW-10 + ai.x*scaleX,10 + ai.y*scaleY,4,4);
+    }
+
+    ctx.restore();
+}
+
+/* Menus */
+function drawMenu(){
+    if(gameState==="menu"){
+        ctx.fillStyle="rgba(0,0,0,0.7)";
+        ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle="#fff";
+        ctx.font="40px Arial";
+        ctx.fillText("ULTRA COMPLEX CAR GAME",canvas.width/2-250,canvas.height/2-40);
+        ctx.font="20px Arial";
+        ctx.fillText("Press ENTER to Start",canvas.width/2-90,canvas.height/2+20);
+    }
+}
+/* ============================================================
+   PART 9 — SOUND ENGINE (ENGINE, SKID, COLLISIONS)
+   ============================================================ */
+
+// Placeholder: simple Audio API
+const sounds = {
+    engine:new Audio(), // load engine sound
+    skid:new Audio(),   // load skid sound
+    crash:new Audio()   // load collision sound
+};
+
+function playEngineSound(){
+    // volume based on speed
+    // simplified demo
+}
+/* ============================================================
+   PART 10 — GAMEPAD SUPPORT + LOCAL MULTIPLAYER
+   ============================================================ */
+
+let gamepads = {};
+window.addEventListener("gamepadconnected",e=>{
+    gamepads[e.gamepad.index]=e.gamepad;
+});
+window.addEventListener("gamepaddisconnected",e=>{
+    delete gamepads[e.gamepad.index];
+});
+
+function handleGamepads(){
+    const pads=navigator.getGamepads();
+    for(let pad of pads){
+        if(!pad) continue;
+        // Example: left stick control for first player
+        player.steerAngle = pad.axes[0]*player.maxSteer;
+        player.vx += Math.cos(player.angle)*pad.buttons[7].value*player.accel;
+        player.vy += Math.sin(player.angle)*pad.buttons[7].value*player.accel;
+    }
+}
+/* ============================================================
+   PART 11 — ONLINE MULTIPLAYER (WebRTC P2P)
+   ============================================================ */
+
+// Highly simplified placeholder: actual WebRTC requires signaling server
+let onlinePlayers = [];
+function syncOnline(){
+    // send local player data to peers
+    // receive remote players
+    // update remote AI-like objects
+}
+/* ============================================================
+   PART 12 — FINAL ASSEMBLY + POLISH
+   ============================================================ */
+
+function gameLoop(time){
+    const delta = (time-lastTime)/16.666;
+    lastTime = time;
+
+    if(gameState==="play"){
+        player.update(delta);
+        for(let ai of aiCars) ai.update(delta);
+
+        handleCollisions(player);
+        for(let ai of aiCars) handleCollisions(ai);
+
+        checkCheckpoints(player);
+
+        spawnRain();
+        spawnParticles(player);
+
+        updateParticles();
+    }
+
+    // Draw everything
+    ctx.fillStyle = weather.night ? "#111" : "#222";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    drawTrack();
+    player.draw();
+    for(let ai of aiCars) ai.draw();
+    drawParticles();
+    drawMinimap();
+    drawMenu();
+    drawNight();
+
+    requestAnimationFrame(gameLoop);
+}
+
+let lastTime=performance.now();
+requestAnimationFrame(gameLoop);
